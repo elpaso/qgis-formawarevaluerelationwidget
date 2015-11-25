@@ -19,13 +19,20 @@ repository=https://github.com/elpaso/qgis-formawarevaluerelationwidget
 
 experimental=False
 
-about=This plugin provides a "Form Value Relation" widget (very similar clone of
-    QgsValueRelationWidgetWrapper) that refreshes the related item values on
-    every change in the form values and that passes the form values to the
-    context. The exppression is re-evaluated every time the form changes.
+about=This is a core-enhancement plugin that allow the implementation of complex
+    dynamic filters in QGIS attribute forms.
 
-    An additional custom expression "CurrentFormValue()" allow to read the form
+    This plugin provides a "Form Value Relation" widget (very similar clone of
+    QgsValueRelationWidgetWrapper) that refreshes the related item values on
+    every change in the form values and that makes available the form values to the
+    context. The expression is re-evaluated every time the form changes if
+    the changed fields are part of the expression.
+
+    An custom expression function "CurrentFormValue()" allow to read the form
     values from  the expression context.
+
+    This widget can be used to implement drill-down forms, where the values available
+    in one field depend on the values of other fields.
 
     This plugin has been funded at 50% by "ARPA Piemonte"
 
