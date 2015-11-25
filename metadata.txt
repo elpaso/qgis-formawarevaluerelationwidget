@@ -1,0 +1,34 @@
+[general]
+name=Form Value Relation
+qgisMinimumVersion=2.12
+qgisMaximumVersion=2.99
+description=Form Aware Value Relation Widget
+version=version 1.0
+author=Alessandro Pasotti for ARPA Piemonte
+email=elpaso@itopen.it
+
+
+changelog=
+    1.0 first version
+
+tags=forms
+
+tracker=https://github.com/elpaso/qgis-formawarevaluerelationwidget/issues
+homepage=http://www.itopen.it/qgis-and-formawarevaluerelationwidget
+repository=https://github.com/elpaso/qgis-formawarevaluerelationwidget
+
+experimental=False
+
+about=This plugin provides a "Form Value Relation" widget (very similar clone of
+    QgsValueRelationWidgetWrapper) that refreshes the related item values on
+    every change in the form values and that passes the form values to the
+    context. The exppression is re-evaluated every time the form changes.
+
+    An additional custom expression "CurrentFormValue()" allow to read the form
+    values from  the expression context.
+
+    This plugin has been funded at 50% by "ARPA Piemonte"
+
+
+; change icon...
+icon=icons/icon.png

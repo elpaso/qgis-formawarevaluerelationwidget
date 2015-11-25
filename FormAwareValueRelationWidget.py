@@ -1,0 +1,506 @@
+# -*- coding: utf-8 -*-
+"""
+***************************************************************************
+    Form Aware Value Relation Widget
+
+    This plugin provides a "Form Value Relation" Widget that is a clone of
+    QgsValueRelationWidgetWrapper that refreshes the related item values on
+    every change in the form values and that passes the form values to the
+    context. The expression is re-evaluated every time the form changes.
+
+    An additional custom expression "CurrentFormValue" allow to read the form
+    values from  the expression context.
+
+    This plugin has been partially funded (50%) by ARPA Piemonte
+
+    ---------------------
+    Date                 : November 2015
+    Copyright            : © 2015 ItOpen
+    Contact              : info@itopen.it
+    Author               : Alessandro Pasotti
+
+***************************************************************************
+*                                                                         *
+*   This program is free software; you can redistribute it and/or modify  *
+*   it under the terms of the GNU General Public License as published by  *
+*   the Free Software Foundation; either version 2 of the License, or     *
+*   (at your option) any later version.                                   *
+*                                                                         *
+***************************************************************************
+"""
+__author__ = 'Alessandro Pasotti'
+__date__ = 'November 2015'
+__copyright__ = '© 2015 ItOpen'
+
+
+import os
+
+from PyQt4.QtCore import *
+from PyQt4.QtGui import *
+from PyQt4 import uic
+
+from qgis.core import *
+from qgis.gui import *
+
+
+def log(msg):
+    QgsMessageLog.logMessage(msg, 'FormAwareValueRelation')
+
+def tr(text):
+    return QCoreApplication.translate('Widget', text)
+
+
+def FormValueFunc(value, context, parent):
+    """
+    This function returns the current value of a field in the editor form.
+    <h4>Example:</h4>
+    <pre>
+    CurrentFormValue('FIELD_NAME')
+    </pre>
+    <h4>Notes</h4>
+    <ul>
+    <li>
+    This function  can only be used inside forms and it's particularly useful
+    when used together with the custom widget <b>Form Value Relation</b>
+    </li>
+    <li>
+    If the field does not exists the function returns an empty string.
+    </li>
+    </ul>
+    """
+    try:
+        #log('FormValue(%s) %s' % (value, context.variable('FormValues').get(str(value), '')))
+        return context.variable('FormValues').get(str(value), '')
+    except (AttributeError, NameError):
+        return ''
+
+
+def register_functionV2(function, arg_count, group, usesgeometry=False, **kwargs):
+    """
+    Register a Python function to be used as a expression function.
+
+    Functions should take (values, feature, parent) as args:
+
+    Example:
+        def myfunc(values, feature, parent):
+            pass
+
+    They can also shortcut naming feature and parent args by using *args
+    if they are not needed in the function.
+
+    Example:
+        def myfunc(values, *args):
+            pass
+
+    Functions should return a value compatible with QVariant
+
+    Eval errors can be raised using parent.setEvalErrorString("Error message")
+
+    :param function:
+    :param arg_count:
+    :param group:
+    :param usesgeometry:
+    :return:
+    """
+    class QgsExpressionFunction(QgsExpression.Function):
+
+        def __init__(self, func, name, args, group, helptext='', usesgeometry=False, expandargs=False):
+            QgsExpression.Function.__init__(self, name, args, group, helptext, usesgeometry, isContextual=False)
+            self.function = func
+            self.expandargs = expandargs
+
+        def funcV2(self, values, context, parent):
+            try:
+                if self.expandargs:
+                    values.append(context)
+                    values.append(parent)
+                    return self.function(*values)
+                else:
+                    return self.function(values, context, parent)
+            except Exception as ex:
+                parent.setEvalErrorString(str(ex))
+                return None
+
+    helptemplate = string.Template("""<h3>$name function</h3><br>$doc""")
+    name = kwargs.get('name', function.__name__)
+    helptext = function.__doc__ or ''
+    helptext = helptext.strip()
+    expandargs = False
+
+    if arg_count == "auto":
+        # Work out the number of args we need.
+        # Number of function args - 2.  The last two args are always feature, parent.
+        args = inspect.getargspec(function).args
+        number = len(args)
+        arg_count = number - 2
+        expandargs = True
+
+    register = kwargs.get('register', True)
+    if register and QgsExpression.isFunctionName(name):
+        if not QgsExpression.unregisterFunction(name):
+            msgtitle = QCoreApplication.translate("UserExpressions", "User expressions")
+            msg = QCoreApplication.translate("UserExpressions", "The user expression {0} already exists and could not be unregistered.").format(name)
+            QgsMessageLog.logMessage(msg + "\n", msgtitle, QgsMessageLog.WARNING)
+            return None
+
+    function.__name__ = name
+    helptext = helptemplate.safe_substitute(name=name, doc=helptext)
+
+    f = QgsExpressionFunction(function, name, arg_count, group, helptext, usesgeometry, expandargs)
+
+    # This doesn't really make any sense here but does when used from a decorator context
+    # so it can stay.
+    if register:
+        QgsExpression.registerFunction(f)
+    return f
+
+
+
+class FormAwareValueRelationWidgetPlugin():
+    def __init__(self, iface):
+        self.my_factory = FormAwareValueRelationWidgetFactory('Form Value Relation')
+        QgsEditorWidgetRegistry.instance().registerWidget( 'formawarevaluerelationwidget', self.my_factory)
+        # Add to iface to not gc
+        iface._FormValueFunc = FormValueFunc
+        iface._FormValueFuncEntry = register_functionV2(FormValueFunc, "auto", 'Custom', name="CurrentFormValue")
+        iface._WidgetPlugin = self.my_factory
+
+    def initGui(self):
+        pass
+
+    def unload(self):
+        QgsExpression.unregisterFunction("CurrentFormValue")
+
+
+
+
+class FormAwareValueRelationWidgetWrapper(QgsEditorWidgetWrapper):
+    """
+    This widget is a clone of QgsValueRelationWidgetWrapper with some important
+    differences.
+
+    When the widget is created:
+
+    * the whole unfiltered features are loaded and cached
+    * the form values of all the attributes are added to the context
+    * the filtering against the expression happens every time the
+      widget is refreshed
+    * a signal is bound to the form changes and if the changed field
+      is present in the filter expression, the features are filtered
+      against the expression and the widget is refreshed
+
+    """
+
+    def __init__(self, vl, fieldIdx, editor, parent):
+        """
+        QgsVectorLayer* vl, int fieldIdx, QWidget* editor, QWidget* parent
+        """
+        self.mComboBox = None
+        self.mListWidget = None
+        self.mLineEdit = None
+        self.mLayer = vl
+        self.mFeature = None
+        super(FormAwareValueRelationWidgetWrapper, self).__init__(vl, fieldIdx, editor, parent)
+        self.key_index = -1
+        self.value_index = -1
+        self.context = None
+        self.expression = None
+        # Re-create the cache if the layer is modified
+        vl.layerModified.connect(self.createCache)
+        self.completer_list = None # Caches completer elements
+        self.completer = None # Store compler instance
+
+
+    def value(self):
+        v = ''
+        if self.mComboBox is not None:
+            cbxIdx = self.mComboBox.currentIndex()
+            if cbxIdx > -1:
+                v = self.mComboBox.itemData( self.mComboBox.currentIndex() )
+        if self.mListWidget is not None:
+            item = QListWidgetItem()
+            selection = []
+            for i in range(self.mListWidget.count()):
+                item = self.mListWidget.item( i )
+                if item.checkState() == Qt.Checked:
+                    selection.append(str(item.data( Qt.UserRole )))
+            v = '{%s}' %  ",".join(selection)
+
+        if self.mLineEdit is not None:
+            for f in self.mCache:
+                if f.attributes()[self.value_index] == self.mLineEdit.text():
+                    v = str(f.attributes()[self.key_index])
+        return v
+
+
+    def createWidget(self, parent):
+        self.parent().attributeChanged.connect(self.attributeChanged)
+        if self.config( "AllowMulti" ) == '1':
+            self.mListWidget =  QListWidget( parent )
+            QObject.connect( self.mListWidget, SIGNAL( "itemChanged( QListWidgetItem* )" ), self, SLOT( "valueChanged()" ) )
+            return self.mListWidget
+        elif self.config( "UseCompleter" ) == '1':
+            self.mLineEdit = QgsFilterLineEdit( parent )
+            return self.mLineEdit
+        self.mComboBox = QComboBox( parent )
+        QObject.connect( self.mComboBox, SIGNAL( "currentIndexChanged( int )" ), self, SLOT( "valueChanged()" ) )
+        return self.mComboBox
+
+
+    def initWidget(self, editor):
+
+        if isinstance(editor, QComboBox):
+            self.mComboBox = editor
+        elif isinstance(editor, QListWidget):
+            self.mListWidget = editor
+        elif isinstance(editor,QLineEdit ):
+            self.mLineEdit = editor
+
+        self.createCache()
+        self.populateWidget()
+
+
+    def attributeChanged(self, name, value):
+        """
+        Something has changed in the form
+        """
+        log('attributeChanged %s %s' % (name, value))
+        if self.expression is not None \
+            and ( name in self.expression.referencedColumns() \
+                or self.expression.expression().find("'%s'" % name) != -1 ):
+            self.populateWidget()
+
+
+    def populateWidget(self):
+        """
+        Filter possibly cached widget values
+        """
+        log('populateWidget')
+        if self.context is None:
+            return
+
+        # I cache is disabled, recreates the cache every time
+        if self.config( "DisableCache" ) == '1':
+            self.createCache()
+
+
+        # Add Form variables to the scope
+        self.context.lastScope().setVariable('FormValues',
+                            {c.field().name(): c.value() for c in self.parent().children() \
+                                if isinstance(c, QgsEditorWidgetWrapper)})
+
+        # Makes a filtered copy of the cache, keeping only attributes
+        if self.expression is not None:
+            cache = []
+            for f in self.mCache:
+                self.context.setFeature( f )
+                if self.expression and not self.expression.evaluate( self.context ):
+                    continue
+                cache.append( (str(f.attributes()[self.key_index]), str(f.attributes()[self.value_index])))
+        else:
+            cache = [(str(f.attributes()[self.key_index]), str(f.attributes()[self.value_index])) for f in self.mCache]
+
+        if self.config( "OrderByValue" ) == '1':
+            cache.sort(key=lambda x: x[1])
+        else:
+            cache.sort(key=lambda x: x[0])
+
+
+        if self.mComboBox is not None:
+            self.mComboBox.clear()
+            if self.config( "AllowNull" ) == '1':
+                self.mComboBox.addItem( tr( "(no selection)" ), '')
+
+            for k,i in cache:
+                self.mComboBox.addItem(i, k)
+
+        elif self.mListWidget is not None:
+            self.mListWidget.clear()
+            for k,i in cache:
+                item = QListWidgetItem(i)
+                item.setData(Qt.UserRole, k)
+                item.setCheckState(Qt.Unchecked)
+                self.mListWidget.addItem( item )
+
+        elif self.mLineEdit is not None:
+            self.completer_list = QStringListModel( [i[1] for i in cache] )
+            self.completer = QCompleter( self.completer_list, self.mLineEdit )
+            self.completer.setCaseSensitivity( Qt.CaseInsensitive )
+            self.mLineEdit.setCompleter(self.completer)
+
+
+    def valid(self):
+        return self.mListWidget is not None or self.mLineEdit is not None or self.mComboBox is not None
+
+
+    def setValue(self, value):
+        if self.mListWidget is not None:
+            checkList = str(value)[1:-1].split( ',' )
+            for i in range(self.mListWidget.count()):
+                item = self.mListWidget.item( i )
+                item.setCheckState(Qt.Checked if str(item.data( Qt.UserRole )) in checkList else Qt.Unchecked)
+        elif self.mComboBox is not None:
+            self.mComboBox.setCurrentIndex( self.mComboBox.findData( value ) )
+        elif self.mLineEdit is not None:
+            for f in self.mCache:
+                if str(f.attributes()[self.key_index]) == str(value):
+                    self.mLineEdit.setText( str(f.attributes()[self.value_index]) )
+                    break
+
+
+    def createCache(self):
+        log('createCache')
+        layer = QgsMapLayerRegistry.instance().mapLayer( self.config( "Layer" ) )
+        cache = []
+        attributes = []
+
+        if layer is not None:
+            ki = layer.fieldNameIndex( self.config( "Key" ) )
+            vi = layer.fieldNameIndex( self.config( "Value" ) )
+
+            context = QgsExpressionContext()
+            context << QgsExpressionContextUtils.globalScope()
+            context << QgsExpressionContextUtils.projectScope()
+            context << QgsExpressionContextUtils.layerScope( layer )
+
+            e = None
+            if  self.config( "FilterExpression" ):
+                e = QgsExpression( self.config( "FilterExpression" ) )
+                if e.hasParserError() or not e.prepare( context ):
+                    ki = -1
+
+            if ki >= 0 and vi >= 0:
+                attributes = [ki, vi]
+
+            flags = QgsFeatureRequest.NoGeometry
+
+            requiresAllAttributes = False
+            if e:
+                if e.needsGeometry():
+                    flags = QgsFeatureRequest.NoFlags
+
+                for field in e.referencedColumns():
+                    if field == QgsFeatureRequest.AllAttributes:
+                        requiresAllAttributes = True
+                        break
+                    idx = layer.fieldNameIndex( field )
+                    if idx < 0:
+                        continue
+                    attributes.append(idx)
+
+            fr = QgsFeatureRequest()
+            fr.setFlags( flags )
+
+            if not requiresAllAttributes:
+                fr.setSubsetOfAttributes(attributes)
+
+            for f in layer.getFeatures( fr ):
+                cache.append( f )
+
+            self.key_index = ki
+            self.value_index = vi
+            self.context = context
+            self.expression = e
+
+        self.mCache = cache
+
+
+class FormAwareValueRelationConfigDlg(QgsEditorConfigWidget):
+
+    def __init__(self, vl, fieldIdx, parent):
+        super(FormAwareValueRelationConfigDlg, self).__init__( vl, fieldIdx, parent )
+        ui_path = os.path.join(os.path.dirname(__file__), 'gui/FormAwareValueRelationConfigDlg.ui')
+        uic.loadUi(ui_path, self)
+        self.mLayerName.setFilters( QgsMapLayerProxyModel.VectorLayer )
+        QObject.connect( self.mLayerName, SIGNAL( "layerChanged( QgsMapLayer* )" ), self.mKeyColumn, SLOT( "setLayer( QgsMapLayer* )" ) )
+        QObject.connect( self.mLayerName, SIGNAL( "layerChanged( QgsMapLayer* )" ), self.mValueColumn, SLOT( "setLayer( QgsMapLayer* )" ) )
+        self.mEditExpression.clicked.connect(self.editExpression)
+
+
+    def config(self):
+        cfg = dict()
+        cfg["Layer"] = self.mLayerName.currentLayer().id() if self.mLayerName.currentLayer() else ''
+        cfg["Key"] = self.mKeyColumn.currentField()
+        cfg["Value"] = self.mValueColumn.currentField()
+        cfg["AllowMulti"] = '1' if self.mAllowMulti.isChecked() else '0'
+        cfg["AllowNull"] = '1' if self.mAllowNull.isChecked() else '0'
+        cfg["OrderByValue"] = '1' if self.mOrderByValue.isChecked() else '0'
+        cfg["FilterExpression"] = self.mFilterExpression.toPlainText()
+        cfg["UseCompleter"] = '1' if self.mUseCompleter.isChecked() else '0'
+        cfg["DisableCache"] = '1' if self.mDisableCache.isChecked() else '0'
+
+        return cfg
+
+    def setConfig(self, config ):
+        lyr = QgsMapLayerRegistry.instance().mapLayer( config.get( "Layer" ) )
+        self.mLayerName.setLayer( lyr )
+        self.mKeyColumn.setField( config.get( "Key" ) )
+        self.mValueColumn.setField( config.get( "Value" ) )
+        self.mAllowMulti.setChecked( config.get( "AllowMulti" ) == '1' )
+        self.mAllowNull.setChecked( config.get( "AllowNull" ) == '1' )
+        self.mOrderByValue.setChecked( config.get( "OrderByValue" ) == '1' )
+        self.mFilterExpression.setPlainText( config.get( "FilterExpression" ) )
+        self.mUseCompleter.setChecked( config.get( "UseCompleter" ) == '1' )
+        self.mDisableCache.setChecked( config.get( "DisableCache" ) == '1' )
+
+
+    def editExpression(self):
+        vl = self.mLayerName.currentLayer()
+        if not vl:
+            return
+
+        context = QgsExpressionContext()
+        context << QgsExpressionContextUtils.globalScope()
+        context << QgsExpressionContextUtils.projectScope()
+        context << QgsExpressionContextUtils.layerScope( vl )
+
+        dlg = QgsExpressionBuilderDialog( vl, self.mFilterExpression.toPlainText(), self, "generic", context )
+        dlg.setWindowTitle( tr( "Edit filter expression" ) )
+
+        if dlg.exec_() == QDialog.Accepted:
+            self.mFilterExpression.setText( dlg.expressionBuilder().expressionText() )
+
+
+
+class  FormAwareValueRelationWidgetFactory( QgsEditorWidgetFactory ):
+
+    def __init__(self, name):
+        super(FormAwareValueRelationWidgetFactory, self).__init__( name )
+        self.wrapper = None
+        self.dlg = None
+
+
+    def create(self, vl, fieldIdx, editor, parent):
+        # QgsVectorLayer* vl, int fieldIdx, QWidget* editor, QWidget* parent
+        self.wrapper = FormAwareValueRelationWidgetWrapper( vl, fieldIdx, editor, parent )
+        return self.wrapper
+
+
+    def configWidget(self, vl, fieldIdx, parent ):
+        self.dlg = FormAwareValueRelationConfigDlg( vl, fieldIdx, parent )
+        return self.dlg
+
+    def writeConfig(self, config, configElement, doc, layer, fieldIdx):
+        configElement.setAttribute( "Layer", config.get( "Layer" ))
+        configElement.setAttribute( "Key", config.get( "Key" ))
+        configElement.setAttribute( "Value", config.get( "Value" ))
+        configElement.setAttribute( "FilterExpression", config.get( "FilterExpression" ))
+        configElement.setAttribute( "OrderByValue", config.get( "OrderByValue" ))
+        configElement.setAttribute( "AllowMulti", config.get( "AllowMulti" ))
+        configElement.setAttribute( "AllowNull", config.get( "AllowNull" ))
+        configElement.setAttribute( "UseCompleter", config.get( "UseCompleter" ))
+        configElement.setAttribute( "DisableCache", config.get( "DisableCache" ))
+
+    def readConfig( self, configElement, layer, fieldIdx ):
+        cfg = dict()
+        cfg["Layer"] = configElement.attribute("Layer")
+        cfg["Key"] = configElement.attribute("Key")
+        cfg["Value"] = configElement.attribute("Value")
+        cfg["AllowMulti"] = configElement.attribute("AllowMulti")
+        cfg["AllowNull"] = configElement.attribute("AllowNull")
+        cfg["OrderByValue"] = configElement.attribute("OrderByValue")
+        cfg["FilterExpression"] = configElement.attribute("FilterExpression")
+        cfg["UseCompleter"] = configElement.attribute("UseCompleter")
+        cfg["DisableCache"] = configElement.attribute("DisableCache")
+        return cfg
+
