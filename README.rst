@@ -16,7 +16,7 @@ This plugin has been partially funded (50%) by ARPA Piemonte.
 Implementation
 --------------
 
-It is essentially a clone of the core "Value Relation" plugin with some important
+It is essentially a clone of the core "Value Relation" widget with some important
 differences:
 
 When the widget is created:

@@ -14,7 +14,7 @@ changelog=
 tags=forms
 
 tracker=https://github.com/elpaso/qgis-formawarevaluerelationwidget/issues
-homepage=http://www.itopen.it/qgis-and-formawarevaluerelationwidget
+homepage=http://www.itopen.it/a-new-qgis-plugin-allows-dynamic-filtering-of-values-in-forms
 repository=https://github.com/elpaso/qgis-formawarevaluerelationwidget
 
 experimental=False
@@ -37,5 +37,4 @@ about=This is a core-enhancement plugin that allow the implementation of complex
     This plugin has been funded at 50% by "ARPA Piemonte"
 
 
-; change icon...
 icon=icons/icon.png
