@@ -28,7 +28,7 @@ about=This is a core-enhancement plugin that allow the implementation of complex
     context. The expression is re-evaluated every time the form changes if
     the changed fields are part of the expression.
 
-    An custom expression function "CurrentFormValue()" allow to read the form
+    A custom expression function "CurrentFormValue()" allow to read the form
     values from  the expression context.
 
     This widget can be used to implement drill-down forms, where the values available
