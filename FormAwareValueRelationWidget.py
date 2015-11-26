@@ -42,9 +42,11 @@ from PyQt4 import uic
 from qgis.core import *
 from qgis.gui import *
 
+DEBUG_FAVR_PLUGIN=False
 
 def log(msg):
-    QgsMessageLog.logMessage(msg, 'FormAwareValueRelation')
+    if DEBUG_FAVR_PLUGIN:
+        QgsMessageLog.logMessage(msg, 'FormAwareValueRelation')
 
 def tr(text):
     return QCoreApplication.translate('Widget', text)
@@ -140,7 +142,7 @@ def register_functionV2(function, arg_count, group, usesgeometry=False, **kwargs
         if not QgsExpression.unregisterFunction(name):
             msgtitle = QCoreApplication.translate("UserExpressions", "User expressions")
             msg = QCoreApplication.translate("UserExpressions", "The user expression {0} already exists and could not be unregistered.").format(name)
-            QgsMessageLog.logMessage(msg + "\n", msgtitle, QgsMessageLog.WARNING)
+            log(msg)
             return None
 
     function.__name__ = name

@@ -26,7 +26,7 @@ clean:
 	rm -f EXTRAS RESOURCE_FILES
 
 package:
-	cd .. && find FormAwareValueRelationWidget/  -print|grep -v Make | grep -v .pyc | grep -v zip | grep -v .git | zip FormAwareValueRelationWidget.zip -@
+	cd .. && find FormAwareValueRelationWidget/  -print| grep -v Make | grep -v 'doc' | grep -v .pyc | grep -v zip | grep -v .git | zip FormAwareValueRelationWidget.zip -@
 
 localrepo:
 	cp ../FormAwareValueRelationWidget.zip ~/public_html/qgis/FormAwareValueRelationWidget.zip
