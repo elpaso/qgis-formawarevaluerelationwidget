@@ -281,7 +281,7 @@ class FormAwareValueRelationWidgetWrapper(QgsEditorWidgetWrapper):
         if self.context is None:
             return
 
-        # I cache is disabled, recreates the cache every time
+        # If cache is disabled, recreates the cache every time
         if self.config( "DisableCache" ) == '1':
             self.createCache()
 
@@ -298,7 +298,7 @@ class FormAwareValueRelationWidgetWrapper(QgsEditorWidgetWrapper):
                 self.context.setFeature( f )
                 if self.expression and not self.expression.evaluate( self.context ):
                     continue
-                cache.append( (str(f.attributes()[self.key_index]), str(f.attributes()[self.value_index])))
+                cache.append( (unicode(f.attributes()[self.key_index]), unicode(f.attributes()[self.value_index])))
         else:
             cache = [(str(f.attributes()[self.key_index]), str(f.attributes()[self.value_index])) for f in self.mCache]
 
