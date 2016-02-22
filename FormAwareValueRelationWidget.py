@@ -49,7 +49,9 @@ def log(msg):
         QgsMessageLog.logMessage(msg, 'FormAwareValueRelation')
 
 def tr(text):
-    return QCoreApplication.translate('Widget', text)
+    # "Fixes" #3 ;-)
+    return text
+    #return QCoreApplication.translate('Widget', text)
 
 
 def FormValueFunc(value, context, parent):
