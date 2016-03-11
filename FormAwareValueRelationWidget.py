@@ -42,7 +42,7 @@ from PyQt4 import uic
 from qgis.core import *
 from qgis.gui import *
 
-DEBUG_FAVR_PLUGIN=False
+DEBUG_FAVR_PLUGIN=True
 
 def log(msg):
     if DEBUG_FAVR_PLUGIN:
@@ -204,15 +204,43 @@ class FormAwareValueRelationWidgetWrapper(QgsEditorWidgetWrapper):
         self.mLineEdit = None
         self.mLayer = vl
         self.mFeature = None
+        self.mCache = None
         super(FormAwareValueRelationWidgetWrapper, self).__init__(vl, fieldIdx, editor, parent)
         self.key_index = -1
         self.value_index = -1
         self.context = None
         self.expression = None
         # Re-create the cache if the layer is modified
-        vl.layerModified.connect(self.createCache)
+        self.mLayer.layerModified.connect(self.createCache)
         self.completer_list = None # Caches completer elements
         self.completer = None # Store compler instance
+        self.editor = editor
+
+
+    def get_cache_v_from_k(self, k):
+        for f in self.mCache:
+            if f.attributes()[self.key_index] == k:
+                return f.attributes()[self.value_index]
+        return k
+
+
+    def get_cache_k_from_v(self, v):
+        for f in self.mCache:
+            if f.attributes()[self.value_index] == v:
+                return f.attributes()[self.key_index]
+        return v
+
+
+    def representValue(self, value):
+        """This function knows how to represent the value"""
+        v = unicode(value)
+        if self.mComboBox is not None:
+            v = self.get_cache_v_from_k(v)
+        if self.mListWidget is not None:
+            v = "{%s}" % ','.join([self.get_cache_v_from_k(_v) for _v in v.replace('{', '').replace('}', '').split(',')])
+        if self.mLineEdit is not None:
+            pass
+        return v
 
 
     def value(self):
@@ -221,7 +249,7 @@ class FormAwareValueRelationWidgetWrapper(QgsEditorWidgetWrapper):
             cbxIdx = self.mComboBox.currentIndex()
             if cbxIdx > -1:
                 v = self.mComboBox.itemData( self.mComboBox.currentIndex() )
-        if self.mListWidget is not None:
+        elif self.mListWidget is not None:
             item = QListWidgetItem()
             selection = []
             for i in range(self.mListWidget.count()):
@@ -229,18 +257,22 @@ class FormAwareValueRelationWidgetWrapper(QgsEditorWidgetWrapper):
                 if item.checkState() == Qt.Checked:
                     selection.append(str(item.data( Qt.UserRole )))
             v = '{%s}' %  ",".join(selection)
-
-        if self.mLineEdit is not None:
+        elif self.mLineEdit is not None:
             for f in self.mCache:
                 if f.attributes()[self.value_index] == self.mLineEdit.text():
                     v = str(f.attributes()[self.key_index])
+        else:
+            log('WARNING: no widgets!')
+        log("Returning value %s" % v)
         return v
 
 
     def createWidget(self, parent):
-        self.parent().attributeChanged.connect(self.attributeChanged)
+        if hasattr(parent, 'attributeChanged'):
+            self.parent().attributeChanged.connect(self.attributeChanged)
+            #QObject.connect( self.parent(), SIGNAL("attributeChanged()"), self, SLOT("attributeChanged()"))
         if self.config( "AllowMulti" ) == '1':
-            self.mListWidget =  QListWidget( parent )
+            self.mListWidget = QListWidget( parent )
             QObject.connect( self.mListWidget, SIGNAL( "itemChanged( QListWidgetItem* )" ), self, SLOT( "valueChanged()" ) )
             return self.mListWidget
         elif self.config( "UseCompleter" ) == '1':
@@ -252,14 +284,14 @@ class FormAwareValueRelationWidgetWrapper(QgsEditorWidgetWrapper):
 
 
     def initWidget(self, editor):
-
         if isinstance(editor, QComboBox):
             self.mComboBox = editor
         elif isinstance(editor, QListWidget):
             self.mListWidget = editor
-        elif isinstance(editor,QLineEdit ):
+        elif isinstance(editor, QLineEdit ):
             self.mLineEdit = editor
-
+        else:
+            log("WARNING: Not a known widget!")
         self.createCache()
         self.populateWidget()
 
@@ -273,6 +305,8 @@ class FormAwareValueRelationWidgetWrapper(QgsEditorWidgetWrapper):
             and ( name in self.expression.referencedColumns() \
                 or self.expression.expression().find("'%s'" % name) != -1 ):
             self.populateWidget()
+        else:
+            log('attributeChanged: no expression or var is not in expression')
 
 
     def populateWidget(self):
@@ -280,27 +314,29 @@ class FormAwareValueRelationWidgetWrapper(QgsEditorWidgetWrapper):
         Filter possibly cached widget values
         """
         log('populateWidget')
-        if self.context is None:
-            return
+        #if self.context is None:
+        #    return
 
-        # If cache is disabled, recreates the cache every time
-        if self.config( "DisableCache" ) == '1':
-            self.createCache()
-
+        # If caching is disabled, recreates the cache every time
+        self.createCache(self.config( "DisableCache" ) == '1')
 
         # Add Form variables to the scope
-        self.context.lastScope().setVariable('FormValues',
-                            {c.field().name(): c.value() for c in self.parent().children() \
-                                if isinstance(c, QgsEditorWidgetWrapper)})
+        form_vars = {c.field().name(): c.value() for c in self.parent().children() \
+                                if isinstance(c, QgsEditorWidgetWrapper)}
+        self.context.lastScope().setVariable('FormValues', form_vars)
+
+        # Count fields exluding self key, if 0 we are in the attribute dialog
+        if 0 == len([k for k in form_vars.keys() if str(k).lower() !=  self.config( "Key" ).lower()]):
+            self.expression = None
 
         # Makes a filtered copy of the cache, keeping only attributes
         if self.expression is not None:
+            log(self.expression.dump())
             cache = []
             for f in self.mCache:
                 self.context.setFeature( f )
-                if self.expression and not self.expression.evaluate( self.context ):
-                    continue
-                cache.append( (unicode(f.attributes()[self.key_index]), unicode(f.attributes()[self.value_index])))
+                if self.expression.evaluate( self.context ):
+                    cache.append( (unicode(f.attributes()[self.key_index]), unicode(f.attributes()[self.value_index])))
         else:
             cache = [(str(f.attributes()[self.key_index]), str(f.attributes()[self.value_index])) for f in self.mCache]
 
@@ -314,10 +350,9 @@ class FormAwareValueRelationWidgetWrapper(QgsEditorWidgetWrapper):
             self.mComboBox.clear()
             if self.config( "AllowNull" ) == '1':
                 self.mComboBox.addItem( tr( "(no selection)" ), '')
-
             for k,i in cache:
+                log("Adding items: %s %s" % (i,k))
                 self.mComboBox.addItem(i, k)
-
         elif self.mListWidget is not None:
             self.mListWidget.clear()
             for k,i in cache:
@@ -325,12 +360,13 @@ class FormAwareValueRelationWidgetWrapper(QgsEditorWidgetWrapper):
                 item.setData(Qt.UserRole, k)
                 item.setCheckState(Qt.Unchecked)
                 self.mListWidget.addItem( item )
-
         elif self.mLineEdit is not None:
             self.completer_list = QStringListModel( [i[1] for i in cache] )
             self.completer = QCompleter( self.completer_list, self.mLineEdit )
             self.completer.setCaseSensitivity( Qt.CaseInsensitive )
             self.mLineEdit.setCompleter(self.completer)
+        else:
+            log('WARNING: unknown widget!')
 
 
     def valid(self):
@@ -351,9 +387,13 @@ class FormAwareValueRelationWidgetWrapper(QgsEditorWidgetWrapper):
                     self.mLineEdit.setText( str(f.attributes()[self.value_index]) )
                     break
 
-
-    def createCache(self):
-        log('createCache')
+    def createCache(self, force_creation=False):
+        """
+        Creates the cache
+        """
+        log('createCache called')
+        if not (force_creation or self.mCache is None):
+            return
         layer = QgsMapLayerRegistry.instance().mapLayer( self.config( "Layer" ) )
         cache = []
         attributes = []
@@ -407,6 +447,7 @@ class FormAwareValueRelationWidgetWrapper(QgsEditorWidgetWrapper):
             self.expression = e
 
         self.mCache = cache
+        log('createCache: created!')
 
 
 class FormAwareValueRelationConfigDlg(QgsEditorConfigWidget):
@@ -484,6 +525,13 @@ class  FormAwareValueRelationWidgetFactory( QgsEditorWidgetFactory ):
         self.dlg = FormAwareValueRelationConfigDlg( vl, fieldIdx, parent )
         return self.dlg
 
+
+    def representValue(self, vl, fieldIdx, config, cache, value ):
+        if self.wrapper is not None:
+            return self.wrapper.representValue(value)
+        return value
+
+
     def writeConfig(self, config, configElement, doc, layer, fieldIdx):
         configElement.setAttribute( "Layer", config.get( "Layer" ))
         configElement.setAttribute( "Key", config.get( "Key" ))
@@ -494,6 +542,7 @@ class  FormAwareValueRelationWidgetFactory( QgsEditorWidgetFactory ):
         configElement.setAttribute( "AllowNull", config.get( "AllowNull" ))
         configElement.setAttribute( "UseCompleter", config.get( "UseCompleter" ))
         configElement.setAttribute( "DisableCache", config.get( "DisableCache" ))
+
 
     def readConfig( self, configElement, layer, fieldIdx ):
         cfg = dict()
