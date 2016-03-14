@@ -217,6 +217,12 @@ class FormAwareValueRelationWidgetWrapper(QgsEditorWidgetWrapper):
         self.editor = editor
 
 
+    def valid(self):
+        return  isinstance(self.editor, QComboBox) or \
+                isinstance(self.editor, QListWidget) or \
+                isinstance(self.editor, QLineEdit)
+
+
     def get_cache_v_from_k(self, k):
         for f in self.mCache:
             if f.attributes()[self.key_index] == k:
@@ -234,32 +240,32 @@ class FormAwareValueRelationWidgetWrapper(QgsEditorWidgetWrapper):
     def representValue(self, value):
         """This function knows how to represent the value"""
         v = unicode(value)
-        if self.mComboBox is not None:
+        if isinstance(self.editor, QComboBox):
             v = self.get_cache_v_from_k(v)
-        if self.mListWidget is not None:
+        elif isinstance(self.editor, QListWidget):
             v = "{%s}" % ','.join([self.get_cache_v_from_k(_v) for _v in v.replace('{', '').replace('}', '').split(',')])
-        if self.mLineEdit is not None:
+        elif isinstance(self.editor, QLineEdit):
             pass
         return v
 
 
     def value(self):
         v = ''
-        if self.mComboBox is not None:
-            cbxIdx = self.mComboBox.currentIndex()
+        if isinstance(self.editor, QComboBox):
+            cbxIdx = self.editor.currentIndex()
             if cbxIdx > -1:
-                v = self.mComboBox.itemData( self.mComboBox.currentIndex() )
-        elif self.mListWidget is not None:
+                v = self.editor.itemData( self.editor.currentIndex() )
+        elif isinstance(self.editor, QListWidget):
             item = QListWidgetItem()
             selection = []
-            for i in range(self.mListWidget.count()):
-                item = self.mListWidget.item( i )
+            for i in range(self.editor.count()):
+                item = self.editor.item( i )
                 if item.checkState() == Qt.Checked:
                     selection.append(str(item.data( Qt.UserRole )))
             v = '{%s}' %  ",".join(selection)
-        elif self.mLineEdit is not None:
+        elif isinstance(self.editor, QLineEdit):
             for f in self.mCache:
-                if f.attributes()[self.value_index] == self.mLineEdit.text():
+                if f.attributes()[self.value_index] == self.editor.text():
                     v = str(f.attributes()[self.key_index])
         else:
             log('WARNING: no widgets!')
@@ -268,6 +274,7 @@ class FormAwareValueRelationWidgetWrapper(QgsEditorWidgetWrapper):
 
 
     def createWidget(self, parent):
+        """Store m references but do not use them! Use self.editor set in initWidget instead"""
         if hasattr(parent, 'attributeChanged'):
             self.parent().attributeChanged.connect(self.attributeChanged)
             #QObject.connect( self.parent(), SIGNAL("attributeChanged()"), self, SLOT("attributeChanged()"))
@@ -284,16 +291,10 @@ class FormAwareValueRelationWidgetWrapper(QgsEditorWidgetWrapper):
 
 
     def initWidget(self, editor):
-        if isinstance(editor, QComboBox):
-            self.mComboBox = editor
-        elif isinstance(editor, QListWidget):
-            self.mListWidget = editor
-        elif isinstance(editor, QLineEdit ):
-            self.mLineEdit = editor
-        else:
-            log("WARNING: Not a known widget!")
+        log('initWidget')
+        self.editor = editor
         self.createCache()
-        self.populateWidget()
+        self.populateWidget(editor)
 
 
     def attributeChanged(self, name, value):
@@ -309,7 +310,7 @@ class FormAwareValueRelationWidgetWrapper(QgsEditorWidgetWrapper):
             log('attributeChanged: no expression or var is not in expression')
 
 
-    def populateWidget(self):
+    def populateWidget(self, editor=None):
         """
         Filter possibly cached widget values
         """
@@ -317,17 +318,34 @@ class FormAwareValueRelationWidgetWrapper(QgsEditorWidgetWrapper):
         #if self.context is None:
         #    return
 
+        if editor is None:
+            editor = self.widget()
+        self.editor = editor
+
         # If caching is disabled, recreates the cache every time
         self.createCache(self.config( "DisableCache" ) == '1')
 
-        # Add Form variables to the scope
-        form_vars = {c.field().name(): c.value() for c in self.parent().children() \
-                                if isinstance(c, QgsEditorWidgetWrapper)}
-        self.context.lastScope().setVariable('FormValues', form_vars)
+        # Add Form variables to the scope, but only in form mode or it crashes!
+        # editor is deleted with deleteLater :(
+        is_form = isinstance(self.parent().parent(), QDialog)
+        form_vars = {}
+        if is_form:
+            for c in self.parent().children():
+                if isinstance(c, QgsEditorWidgetWrapper) and c != self and c.field().name().lower() != self.config( "Key" ).lower():
+                    form_vars[c.field().name()] = c.value()
 
-        # Count fields exluding self key, if 0 we are in the attribute dialog
-        if 0 == len([k for k in form_vars.keys() if str(k).lower() !=  self.config( "Key" ).lower()]):
+        # Last chance to find values
+        if not is_form or 0 == len(form_vars):
             self.expression = None
+            # Try with the table model  (crash!!!)
+            #try:
+                #for c in self.parent().parent().parent().parent().parent().findChildren(QgsEditorWidgetWrapper):
+                    #if c.field().name().lower() != self.config( "Key" ).lower():
+                        #form_vars[c.field().name()] = c.value()
+            #except:
+                #self.expression = None
+
+        self.context.lastScope().setVariable('FormValues', form_vars)
 
         # Makes a filtered copy of the cache, keeping only attributes
         if self.expression is not None:
@@ -346,45 +364,41 @@ class FormAwareValueRelationWidgetWrapper(QgsEditorWidgetWrapper):
             cache.sort(key=lambda x: x[0])
 
 
-        if self.mComboBox is not None:
-            self.mComboBox.clear()
+        if isinstance(self.editor, QComboBox):
+            self.editor.clear()
             if self.config( "AllowNull" ) == '1':
-                self.mComboBox.addItem( tr( "(no selection)" ), '')
+                self.editor.addItem( tr( "(no selection)" ), '')
             for k,i in cache:
-                log("Adding items: %s %s" % (i,k))
-                self.mComboBox.addItem(i, k)
-        elif self.mListWidget is not None:
-            self.mListWidget.clear()
+                #log("Adding items: %s %s" % (i,k))
+                self.editor.addItem(i, k)
+        elif isinstance(self.editor, QListWidget):
+            self.editor.clear()
             for k,i in cache:
                 item = QListWidgetItem(i)
                 item.setData(Qt.UserRole, k)
                 item.setCheckState(Qt.Unchecked)
-                self.mListWidget.addItem( item )
-        elif self.mLineEdit is not None:
+                self.editor.addItem( item )
+        elif isinstance(self.editor, QLineEdit):
             self.completer_list = QStringListModel( [i[1] for i in cache] )
             self.completer = QCompleter( self.completer_list, self.mLineEdit )
             self.completer.setCaseSensitivity( Qt.CaseInsensitive )
-            self.mLineEdit.setCompleter(self.completer)
+            self.editor.setCompleter(self.completer)
         else:
             log('WARNING: unknown widget!')
 
 
-    def valid(self):
-        return self.mListWidget is not None or self.mLineEdit is not None or self.mComboBox is not None
-
-
     def setValue(self, value):
-        if self.mListWidget is not None:
+        if isinstance(self.editor, QListWidget):
             checkList = str(value)[1:-1].split( ',' )
-            for i in range(self.mListWidget.count()):
-                item = self.mListWidget.item( i )
+            for i in range(self.editor.count()):
+                item = self.editor.item( i )
                 item.setCheckState(Qt.Checked if str(item.data( Qt.UserRole )) in checkList else Qt.Unchecked)
-        elif self.mComboBox is not None:
-            self.mComboBox.setCurrentIndex( self.mComboBox.findData( value ) )
-        elif self.mLineEdit is not None:
+        elif isinstance(self.editor, QComboBox):
+            self.editor.setCurrentIndex( self.editor.findData( value ) )
+        elif isinstance(self.editor, QLineEdit):
             for f in self.mCache:
                 if str(f.attributes()[self.key_index]) == str(value):
-                    self.mLineEdit.setText( str(f.attributes()[self.value_index]) )
+                    self.editor.setText( str(f.attributes()[self.value_index]) )
                     break
 
     def createCache(self, force_creation=False):

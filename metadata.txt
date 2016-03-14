@@ -3,15 +3,17 @@ name=Form Value Relation
 qgisMinimumVersion=2.12
 qgisMaximumVersion=2.99
 description=Form (Aware) Value Relation Widget: an enhanced Value Relation widget and a custom function to read all the form values and build dynamic filters for your drill-down forms.
+Note: when accessed from the attribute table, dynamic filters will not work and this plugin will not behave differently from the standard Value Relation Widget.
 
     This plugin has been 50% funded by "ARPA Piemonte"
 
-version=version 1.3
+version=version 1.4
 author=Alessandro Pasotti for ARPA Piemonte
 email=elpaso@itopen.it
 
 
 changelog=
+    1.4 avoid crash in attribute table by disabling filters when not in identify form mode
     1.3 fixed #3
     1.2 fixed #2
     1.1 Disabled debug messages and fixed #1
