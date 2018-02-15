@@ -56,10 +56,17 @@ def tr(text):
 
 def FormValueFunc(value, context, parent):
     """
-    This function returns the current value of a field in the editor form.
+    This function returns the current value of a field in the editor form
+    and the wkt_geom of the form's feature
     <h4>Example:</h4>
+    Get the <b>FIELD_NAME</b> value<br/>
     <pre>
     CurrentFormValue('FIELD_NAME')
+    </pre>
+    <br/>
+    Get the <b>wkt_geom</b> value<br/>
+    <pre>
+    CurrentFormValue('wkt_geom')
     </pre>
     <h4>Notes</h4>
     <ul>
@@ -249,6 +256,14 @@ class FormAwareValueRelationWidgetWrapper(QgsEditorWidgetWrapper):
         return v
 
 
+    def setFeature(self, feature):
+        super(FormAwareValueRelationWidgetWrapper, self).setFeature(feature)
+        self.mFeature = feature
+        if self.expression is not None \
+            and self.expression.expression().find("'wkt_geom'") != -1 :
+            self.populateWidget()
+
+
     def value(self):
         v = ''
         if isinstance(self.editor, QComboBox):
@@ -333,6 +348,8 @@ class FormAwareValueRelationWidgetWrapper(QgsEditorWidgetWrapper):
             for c in self.parent().children():
                 if isinstance(c, QgsEditorWidgetWrapper) and c != self and c.field().name().lower() != self.config( "Key" ).lower():
                     form_vars[c.field().name()] = c.value()
+            if self.mFeature:
+                form_vars['wkt_geom'] = self.mFeature.geometry().exportToWkt(8)
 
         # Last chance to find values
         if not is_form or 0 == len(form_vars):
