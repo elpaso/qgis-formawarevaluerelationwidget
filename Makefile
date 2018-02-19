@@ -25,6 +25,9 @@ clean:
 	rm -f ../FormAwareValueRelationWidget.zip
 	rm -f EXTRAS RESOURCE_FILES
 
+install:
+	ln -s `pwd` ~/.qgis2/python/plugins/FormAwareValueRelationWidget
+
 package:
 	cd .. && find FormAwareValueRelationWidget/  -print| grep -v Make | grep -v 'doc' | grep -v .pyc | grep -v zip | grep -v .git | zip FormAwareValueRelationWidget.zip -@
 
