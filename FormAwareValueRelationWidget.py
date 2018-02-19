@@ -373,7 +373,7 @@ class FormAwareValueRelationWidgetWrapper(QgsEditorWidgetWrapper):
                 if self.expression.evaluate( self.context ):
                     cache.append( (unicode(f.attributes()[self.key_index]), unicode(f.attributes()[self.value_index])))
         else:
-            cache = [(str(f.attributes()[self.key_index]), str(f.attributes()[self.value_index])) for f in self.mCache]
+            cache = [(unicode(f.attributes()[self.key_index]), unicode(f.attributes()[self.value_index])) for f in self.mCache]
 
         if self.config( "OrderByValue" ) == '1':
             cache.sort(key=lambda x: x[1])
