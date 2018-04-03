@@ -259,6 +259,7 @@ class FormAwareValueRelationWidgetWrapper(QgsEditorWidgetWrapper):
     def setFeature(self, feature):
         super(FormAwareValueRelationWidgetWrapper, self).setFeature(feature)
         self.mFeature = feature
+        self.createCache(True)
         if self.expression is not None \
             and self.expression.expression().find("'wkt_geom'") != -1 :
             self.populateWidget()
