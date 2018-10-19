@@ -350,7 +350,8 @@ class FormAwareValueRelationWidgetWrapper(QgsEditorWidgetWrapper):
                 if isinstance(c, QgsEditorWidgetWrapper) and c != self and c.field().name().lower() != self.config( "Key" ).lower():
                     form_vars[c.field().name()] = c.value()
             if self.mFeature:
-                form_vars['wkt_geom'] = self.mFeature.geometry().exportToWkt(8)
+				if self.mFeature.geometry():
+					form_vars['wkt_geom'] = self.mFeature.geometry().exportToWkt(8)
 
         # Last chance to find values
         if not is_form or 0 == len(form_vars):
